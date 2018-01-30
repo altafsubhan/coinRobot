@@ -1,0 +1,402 @@
+#include "NXT_FileIO.c"
+#include "NXTServo-lib-UW.c"
+
+//OBTAINS PURCHASE PRICE FROM THE USER
+//JANAKAN
+float getPriceFromUser(float *coinValues)  {
+
+	displayString(0, "Input: $2");
+	displayString(1, "R: add"); //right button to add input value
+//left button to decrease input value
+	displayString(2, "L: decrement $"); 
+	displayString(3, "M: submit"); //middle button to submit price
+
+	bool inputtingPrice = true;
+	int coinValueIndex = 3;
+	float price = 0;
+
+	while(inputtingPrice)  {
+
+		//wait for any button to be pressed
+		while(nNxtButtonPressed == -1) {}; 
+		
+		eraseDisplay(); //erases the menu
+		
+		if(nNxtButtonPressed == 1)  {
+			price += coinValues[coinValueIndex]; //adds to price
+			displayString(0, "%.2f", price);
+		}  else if(nNxtButtonPressed == 2) {
+			//decreases the index to the smaller    denomination
+			coinValueIndex--; 
+			displayString(0, "Input: $ %.2f", coinValues[coinValueIndex]); 
+			//displays the new input value
+		} else if(nNxtButtonPressed == 3) {
+			//sets condition to exit while loop
+			inputtingPrice = false; 
+			displayString(0, "Please Wait...");
+		}
+		wait1Msec(500);
+	}
+
+	return price;
+}
+//OPERATES THE CONVEYOR BELT
+//SUBHAN
+bool conveyorBelt(bool &timeStop) {
+
+	time1[T1] = 0;
+
+	motor[motorA] = -45;
+
+	while (SensorValue[S1] == 1 && time1[T1] < 10000) {} 
+	//while S1 sees black and T1 is less than 10 seconds do nothing
+
+	if(time1[T1] >= 10000) 
+	//if no coin has come underneath the light sensor for 10 //////seconds, sets the boolean timeStop to true to exit loop in   //////main function
+		timeStop = true;
+	else
+		timeStop = false;
+
+	motor[motorA] = 0; //stops conveyor belt
+
+	return false; 
+	//returns false when light sensor sees something or when time //////is greater than 10 seconds
+}
+
+//USED TO OBTAIN WIDTH OF COIN FOR CALIBRATION
+//JANAKAN
+int coinCalibrate() {
+
+	motor[motorA] = -45;
+	while(SensorValue[S1] == 1) {} //do nothing when S1 sees black
+	motor[motorA] = 0; //stop conveyor belt
+
+	nMotorEncoder[motorB] = 0;
+	motor[motorB] = 35;
+	while(SensorValue[S2] == 0) {} 
+	//moves the motorB mechanism until the coin touches the touch //////sensor
+
+	motor[motorB] = 0;
+
+	//records the width of the coin
+	int count = nMotorEncoder[motorB]; 
+
+	motor[motorB] = -35;
+
+	//returns the mechanism to its initial position
+	while(nMotorEncoder[motorB] > 0) {} 
+
+	motor[motorB] = 0;
+
+	motor[motorA] = -45; 
+
+	//moves the conveyor belt forward a little bit to ensure that //  //the coin is not still underneath the light sensor
+	wait1Msec(1000);
+	motor[motorA] = 0;
+
+	return count;
+}
+
+//CALIBRATES THE MOTOR B MECHANISM AND COIN DIAMETER MEASUREMENTS
+//JANAKAN
+void calibrateEncoderCount(float *coinCounts, float *coinValues) {
+	eraseDisplay();
+
+	displayString(0, "Calibrating...");
+	nMotorEncoder[motorB] = 0;
+	motor[motorB] = 45;
+	//moves motorB mechanism forward until S1 detects it
+	while(SensorValue[S1] == 1) {} 
+	motor[motorB] = 0;
+	nMotorEncoder[motorB] = 0;
+	motor[motorB] = -45;
+	while(fabs(nMotorEncoder[motorB]) < 3300) {}
+	//moves the mechanism backwards until it is 3300 counts away //////from the light sensor (set as the datum point)
+	motor[motorB] = 0;
+
+	wait1Msec(1000);
+
+	for(int i = 0; i<SIZE; i++) {
+		wait1Msec(500);
+		//prompts user to input each coin one at a time
+		displayString(i+1, "Enter: %.2f", coinValues[i]); 
+		//calls the coinCalibrate function to calibrate the widths            //////////of each coin and places them into correct place in array
+		coinCounts[i] = coinCalibrate(); 
+	}
+}
+
+//CALCULATES THE TOLERANCE TO BE USED IN MEASUREMENTS
+//SUBHAN
+float toleranceCalculation(float *coinCounts) {
+
+	int differenceSum = 0;
+	float averageDifference = 0;
+
+	for (int i = 0; i < SIZE - 1; i++)
+		differenceSum += coinCounts[i] - coinCounts[i+1]; 
+		//adds the difference between two adjacent coin widths
+
+	averageDifference = differenceSum/3.0; 
+	//takes the average of all the differences between adjacent //////coins
+
+	return averageDifference/2; 
+	//returns the average divided by 2 because the tolerance is for //////both greater and less than the actual width
+}
+
+//USED TO RECOGNIZE THE COINs PROVIDED TO THE ROBOT
+//SUBHAN AND JANAKAN
+float coinID(int *inventory, int *coinInputtedSafety, float *coinCounts, float tolerance) {
+
+	nMotorEncoder[motorB] = 0;
+
+	motor[motorB] = 45;
+
+	//while nothing has touched the touch sensor, do nothing
+	while (SensorValue[S2] == 0) {} 
+
+	motor[motorB] = 0;
+
+	//records the width for the coin inputted
+	int width = nMotorEncoder[motorB]; 
+
+	motor[motorB] = -45;
+
+	//returns the mechanism back to its initial position
+	while(nMotorEncoder[motorB] > 0) {} 
+	motor[motorB] = 0;
+
+	float totalInput = 0;
+
+	//determines which coin was inputted
+	if (fabs(width - coinCounts[0]) < tolerance) { 
+	//checks if the coin inputted is within tolerance for the //////calibrated nickel width
+		inventory[0]++; 
+		//if so, adds to the inventory of the nickel
+		coinInputtedSafety[0]++; 
+		//adds to the inventory of the coinInputtedSafety of the //////////nickel
+		totalInput += 0.05; 
+		//increases the totalInput to the value of the coin //////////inputted, 0.05 dollars
+	} else if (fabs(width - coinCounts[1]) < tolerance) {
+		inventory[1]++;
+		coinInputtedSafety[1]++;
+		totalInput += 0.25;
+	} else if (fabs(width - coinCounts[2]) < tolerance) {
+		inventory[2]++;
+		coinInputtedSafety[2]++;
+		totalInput += 1;
+	} else if (fabs(width - coinCounts[3]) < tolerance) {
+		inventory[3]++;
+		coinInputtedSafety[3]++;
+		totalInput += 2;
+	}
+
+	nMotorEncoder[motorA] = 0; 
+	//moves the conveyor belt a bit forward so the coin is not //////underneath the light sensor
+	motor[motorA] = -45;
+	wait1Msec(500);
+
+	eraseDisplay();
+
+	for(int i=0; i<=3; i++) { 
+	//displays the current inventory after every coin is inputted
+		displayString(0, "Inventory:", );
+		displayString(i+1, "%d", inventory[i]);
+	}
+
+	return totalInput;
+}
+
+//CALCULATES THE TOTAL CHANGE TO BE RETURNED
+//HOSSAM
+float changeTotal(float totalInput, float price) {
+
+	float changeToReturn = totalInput - price; 
+	//calculates the change to return from the user inputted price //////and their inputted coins
+
+	return changeToReturn;
+}
+
+//DETERMINES WHICH COINS TO RETURN
+//TARICK
+void calculateChange(int *inventory, int *change, float changeToReturn, float *coinValues) {
+
+	for (int i = SIZE - 1; i >= 0; i--) { 
+	//goes from biggest denomination to lowest for the best //////outputted change
+
+		int checkingAvail = changeToReturn / (coinValues[i]); 
+		//changeToReturn/coinValue[index] gives an integer value //////////for the amount to output
+
+		if (inventory[i] >= checkingAvail) { 
+		//if inventory[index] is greater than the integer value
+			change[i] += checkingAvail; 
+			//add the integer value to the specified change index
+			inventory[i] -= checkingAvail; 
+			//decrease the inventory by that integer value
+		} else { 
+		//if the inventory is less than the integer value
+			change[i] += inventory[i]; 
+			//add the inventory at that index to the change index
+			inventory[i] = 0; 
+			//inventory set to 0, no more is inside that index
+		}
+		changeToReturn -= change[i] * coinValues[i]; 
+		//decreases the changeToReturn by the amount added to the //////////change array
+	}
+}
+
+//KEEPS TRACK OF AND DISPLAYS THE TOTAL COIN INVENTORY
+//TARICK
+void updateInventory (int *inventory, float *coinValues) {
+	float totalInventory = 0;
+
+	eraseDisplay();
+
+	for(int i=0; i<=3; i++) {
+		displayString(i, "%.2f: %d", coinValues[i], inventory[i]); 
+		//displays each coin’s inventory
+		totalInventory += coinValues[i]*inventory[i]; 
+		//adds values to totalInventory
+	}
+
+	displayString(4, "%.2f", totalInventory); 
+	//displays totalInventory
+	displayString(6, "M: Next Page");
+	while(nNxtButtonPressed != 3) {}
+	//waits for middle button to be pressed and released
+	while(nNxtButtonPressed == 3) {}
+	eraseDisplay();
+}
+
+//CONTROLS THE MOTORS THAT DISPENSE THE COINS
+//HOSSAM
+void giveChange(int *changeToReturn) {
+
+	setServoPosition(S3, 1, -23); //sets the zero position
+	setServoPosition(S3, 2, 20); //sets the zero position
+
+	for(int i=3; i>=0;i--){
+		wait1Msec(500);
+		while(changeToReturn[i]) { 
+		//while there is still coins in the change array do the //////////following
+			if(i==3) { 
+			//kicks out a coin based on the position of each coin ///////////////slot and the servos
+				setServoPosition(S3, 2, 70);
+				wait1Msec(500);
+				setServoPosition(S3, 2, 20);
+				changeToReturn[i]--;
+			} else if(i==2) {
+				setServoPosition(S3, 2, -35);
+				wait1Msec(500);
+				setServoPosition(S3, 2, 20);
+				changeToReturn[i]--;
+			} else if(i==1){
+				setServoPosition(S3, 1, 35);
+				wait1Msec(500);
+				setServoPosition(S3, 1, -23);
+				changeToReturn[i]--;
+			} else if(i==0) {
+				setServoPosition(S3, 1, -65);
+				wait1Msec(500);
+				setServoPosition(S3, 1, -23);
+				changeToReturn[i]--;
+			}
+		}
+	}
+}
+
+//JANAKAN AND TARICK
+task main()
+{
+	SensorType[S1] = sensorColorNxtFULL;
+	SensorType[S2] = sensorTouch;
+	SensorType[S3] = sensorI2CCustom9V;
+	
+	const int SIZE = 4;	
+
+	//pre-defined amount of coins in the inventory
+	int inventory[SIZE] = {5, 5, 5, 5}; 
+	float coinValues[SIZE] = {0.05, 0.25, 1.00, 2.00};
+	int coinInputtedSafety[SIZE] = {0, 0, 0, 0};
+	int change[SIZE] = {0, 0, 0, 0};
+	float coinCounts[SIZE] = {0, 0, 0, 0};
+
+	bool anotherTransaction = false;
+
+	displayString(0, "M: Start");
+	//waits for user to press and release middle button
+	while(nNxtButtonPressed != 3) {} 
+	while(nNxtButtonPressed == 3) {}
+
+	calibrateEncoderCount(coinCounts, coinValues); 
+	//initially calibrates the coins and encoder mechanism
+	float tolerance = toleranceCalculation(coinCounts); 
+	//sets the tolerance for later calculations
+
+	do {
+		eraseDisplay();
+		anotherTransaction = false; 
+		//resets another transaction to false if user said (s)he //////////wanted one at the end of the previous run
+		float price = getPriceFromUser(coinValues); 
+
+		float totalInput = 0;
+		bool moveConveyorBelt = true;
+		bool timeStop = false;
+
+		while(moveConveyorBelt) {
+			//do nothing when conveyorBelt is true
+			while(conveyorBelt(timeStop)) {} 
+
+			if(timeStop) 
+			//timeStop changed to true from the conveyorBelt //////////// //function exit while loop
+				moveConveyorBelt = false;
+			else 
+			//else add the value of the coin inputted to totalInput
+				totalInput += coinID(inventory, coinInputtedSafety,  ///////////////////////////////////////coinCounts, tolerance);
+		}
+
+		float changeToReturn = changeTotal(totalInput, price); 
+		//calculates the change to return
+
+		float currentInventory = 0;
+
+		for(int i=0; i <= 3; i++) {
+			currentInventory += inventory[i]*coinValues[i]; 
+			//adds to the currentInventory the values of each coin //////////////in the inventory
+		}
+
+		//if no change is to be returned, do nothing
+		if (changeToReturn == 0) {} 
+
+		else if(currentInventory < changeToReturn) { 
+		//if there is not enough money in the inventory, give back //////////the money the user inputted
+			giveChange(coinInputtedSafety);
+			displayString(0, "Insufficient Funds");
+		} else if(currentInventory >= changeToReturn) { 
+		//if there is enough money in the inventory
+
+			calculateChange(inventory, change, changeToReturn, /////////////////////////////coinValues); 
+			//calculate the best denominations for the change
+
+			wait1Msec(500);
+
+			giveChange(change); //give back the change to the user
+		}
+
+			updateInventory(inventory, coinValues); 
+//////////////displays the current inventory
+
+			displayString(0, "Another Transaction?");
+			displayString(1, "Yes: Middle");
+			displayString(2, "No: Bottom");
+
+			time1[T1] = 0;
+
+			while(nNxtButtonPressed == -1 && time1[T1] < 8000) {} 
+			//while no button is pressed and T1 is less than 8 /////////// ///seconds, do nothing
+
+			if(nNxtButtonPressed == 3)
+			//if the middle button was pressed, set ///////////////anotherTransaction to true
+				anotherTransaction = true;
+
+	} while(anotherTransaction);
+}
